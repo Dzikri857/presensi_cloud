@@ -100,24 +100,9 @@ export default function MahasiswaPage() {
     const deviceId = getDeviceId();
 
     // Attempt to parse course_id & session_id from token
-    let courseId = "";
-    let sessionId = "";
-    try {
-      const parsed = JSON.parse(atob(token.split(".")[1] || ""));
-      courseId = parsed.course_id || "";
-      sessionId = parsed.session_id || "";
-    } catch {
-      // Token may not be JWT - try URL params or use raw
-      try {
-        const url = new URL(token);
-        courseId = url.searchParams.get("course_id") || "";
-        sessionId = url.searchParams.get("session_id") || "";
-      } catch {
-        // Treat whole token as qr_token, need course_id and session_id from somewhere
-        courseId = token.split("|")[0] || token;
-        sessionId = token.split("|")[1] || "default";
-      }
-    }
+    // SESUAI MODUL: course_id & session_id harus dikirim eksplisit
+const courseId = "cloud-101";
+const sessionId = "sesi-02";
 
     try {
       // Step 5-6: Get GPS & POST
@@ -153,10 +138,10 @@ export default function MahasiswaPage() {
       });
 
       if (checkinRes.ok) {
-        addLog(`Check-in: ${checkinRes.data.status} - ${checkinRes.data.message}`);
-      } else {
-        addLog(`Check-in error: ${checkinRes.error}`);
-      }
+  addLog(`Check-in sukses: ${checkinRes.data.status} (presence_id: ${checkinRes.data.presence_id})`);
+} else {
+  addLog(`Check-in error: ${checkinRes.error}`);
+}
 
       // Step 11-14: Fetch all status data
       addLog("Memuat data status...");
@@ -178,8 +163,9 @@ export default function MahasiswaPage() {
         setGpsData(gpsLatestRes.data);
       }
       if (gpsHistoryRes.ok) {
-        setGpsHistory(Array.isArray(gpsHistoryRes.data) ? gpsHistoryRes.data : []);
-      }
+  const points = (gpsHistoryRes.data as any).points ?? [];
+  setGpsHistory(points);
+}
 
       addLog("Proses selesai.");
       setPhase({ idle: false, scanning: false, processing: false, done: true });
