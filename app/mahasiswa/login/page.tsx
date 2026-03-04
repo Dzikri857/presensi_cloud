@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Loader2, Eye, EyeOff } from "lucide-react";
+import { loginMahasiswa } from "@/lib/api";
 import { setUserId } from "@/lib/device";
 
 export default function MahasiswaLoginPage() {
@@ -23,17 +24,18 @@ export default function MahasiswaLoginPage() {
     }
 
     setIsLoading(true);
-
     try {
-      // simulasi loading biar terasa real
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      const response = await loginMahasiswa(nim, password);
 
-      // simpan NIM sebagai user_id
-      setUserId(nim);
-
-      router.push("/mahasiswa");
+      if (response.ok) {
+        setUserId(response.data.user_id);
+        router.push("/mahasiswa");
+      } else {
+        setError(response.error || "Login gagal");
+      }
     } catch (err) {
-      setError("Terjadi kesalahan");
+      setError("Terjadi kesalahan koneksi");
+      console.error("[v0] Login error:", err);
     } finally {
       setIsLoading(false);
     }
@@ -42,52 +44,69 @@ export default function MahasiswaLoginPage() {
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center bg-gradient-to-b from-primary/5 to-background px-4 py-8">
       <div className="flex w-full max-w-md flex-col gap-6">
+        {/* Header with back button */}
         <div className="flex items-center gap-3">
           <button
             onClick={() => router.back()}
             className="flex h-10 w-10 items-center justify-center rounded-lg border border-border hover:bg-secondary transition-colors"
+            aria-label="Kembali"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
           <h1 className="text-2xl font-bold text-primary">Login Mahasiswa</h1>
         </div>
 
+        {/* Form */}
         <form onSubmit={handleLogin} className="flex flex-col gap-4">
+          {/* Error message */}
           {error && (
             <div className="rounded-xl bg-destructive/10 border border-destructive/30 p-3 text-sm font-medium text-destructive">
               {error}
             </div>
           )}
 
+          {/* NIM Input */}
           <div className="flex flex-col gap-2">
-            <label className="text-sm font-semibold">
+            <label
+              htmlFor="nim"
+              className="text-sm font-semibold text-foreground"
+            >
               Nomor Induk Mahasiswa (NIM)
             </label>
             <input
+              id="nim"
               type="text"
               placeholder="Contoh: 081211833001"
               value={nim}
               onChange={(e) => setNim(e.target.value)}
               disabled={isLoading}
-              className="h-12 rounded-xl border px-4"
+              className="h-12 rounded-xl border border-input bg-card px-4 text-foreground placeholder:text-muted-foreground disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
 
+          {/* Password Input */}
           <div className="flex flex-col gap-2">
-            <label className="text-sm font-semibold">Password</label>
+            <label
+              htmlFor="password"
+              className="text-sm font-semibold text-foreground"
+            >
+              Password
+            </label>
             <div className="relative">
               <input
+                id="password"
                 type={showPassword ? "text" : "password"}
-                placeholder="Password"
+                placeholder="Masukkan password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={isLoading}
-                className="w-full h-12 rounded-xl border px-4 pr-12"
+                className="w-full h-12 rounded-xl border border-input bg-card px-4 pr-12 text-foreground placeholder:text-muted-foreground disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-ring"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-4 top-1/2 -translate-y-1/2"
+                disabled={isLoading}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
               >
                 {showPassword ? (
                   <EyeOff className="h-5 w-5" />
@@ -98,10 +117,11 @@ export default function MahasiswaLoginPage() {
             </div>
           </div>
 
+          {/* Login Button */}
           <button
             type="submit"
             disabled={isLoading}
-            className="mt-2 h-12 w-full rounded-xl bg-primary text-white font-semibold flex items-center justify-center gap-2"
+            className="mt-2 h-12 w-full rounded-xl bg-primary text-base font-semibold text-primary-foreground shadow-md shadow-primary/20 transition-all active:scale-[0.98] hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {isLoading ? (
               <>
@@ -114,6 +134,7 @@ export default function MahasiswaLoginPage() {
           </button>
         </form>
 
+        {/* Footer info */}
         <p className="text-center text-xs text-muted-foreground">
           Gunakan NIM dan password akun akademik Anda
         </p>
