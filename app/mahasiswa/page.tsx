@@ -87,7 +87,7 @@ export default function MahasiswaPage() {
       }
     } catch (err) {
       setLoginError("Terjadi kesalahan koneksi");
-      console.error("[v0] Login error:", err);
+      console.error(" Login error:", err);
     } finally {
       setIsLoginLoading(false);
     }
@@ -139,7 +139,7 @@ export default function MahasiswaPage() {
         }
       }
     } catch (e) {
-      console.log("[v0] JWT parse failed, trying other formats");
+      console.log("JWT parse failed, trying other formats");
     }
 
     if (!courseId || !sessionId) {
@@ -154,7 +154,7 @@ export default function MahasiswaPage() {
           );
         }
       } catch (e) {
-        console.log("[v0] URL parse failed");
+        console.log("URL parse failed");
       }
     }
 
@@ -489,7 +489,7 @@ export default function MahasiswaPage() {
       </div>
 
       {/* Sticky bottom button */}
-      {!phase.processing && !phase.done && (
+      {isLoggedIn && !phase.processing && !phase.done && (
         <div className="fixed inset-x-0 bottom-0 z-20 bg-gradient-to-t from-background via-background to-transparent px-4 pb-6 pt-4">
           <div className="mx-auto max-w-md">
             <button
