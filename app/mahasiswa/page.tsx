@@ -22,7 +22,8 @@ import {
   type GpsHistoryData,
   type AccelSample,
 } from "@/lib/api";
-import { getDeviceId, getUserId } from "@/lib/device";
+import { getDeviceId, setUserId } from "@/lib/device";
+import { loginMahasiswa } from "@/lib/api";
 
 interface CheckinState {
   idle: boolean;
@@ -34,15 +35,11 @@ interface CheckinState {
 export default function MahasiswaPage() {
   const router = useRouter();
 
-  // Auth protection
-  useEffect(() => {
-    const uid = getUserId();
-    if (!uid) {
-      router.push("/mahasiswa/login");
-    }
-  }, [router]);
-
   // State
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [currentNim, setCurrentNim] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [isLoginLoading, setIsLoginLoading] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [phase, setPhase] = useState<CheckinState>({
     idle: true,
@@ -66,20 +63,41 @@ export default function MahasiswaPage() {
     ]);
   }, []);
 
-  // User ID modal
-  const [showUserIdModal, setShowUserIdModal] = useState(false);
-  const [userIdInput, setUserIdInput] = useState("");
-  const pendingTokenRef = useRef("");
+  // ── Login ──
+  async function handleLogin(e: React.FormEvent) {
+    e.preventDefault();
+    setLoginError("");
 
-  useEffect(() => {
-    // Check if user_id exists
-    const uid = getUserId();
-    if (uid) setUserIdInput(uid);
-  }, []);
+    if (!currentNim.trim()) {
+      setLoginError("NIM harus diisi");
+      return;
+    }
+
+    setIsLoginLoading(true);
+    try {
+      const response = await loginMahasiswa(currentNim, "");
+
+      if (response.ok) {
+        setUserId(response.data.user_id);
+        setIsLoggedIn(true);
+        addLog(`Login berhasil: ${response.data.user_id}`);
+      } else {
+        setLoginError(response.error || "Login gagal");
+        addLog(`Login error: ${response.error}`);
+      }
+    } catch (err) {
+      setLoginError("Terjadi kesalahan koneksi");
+      console.error("[v0] Login error:", err);
+    } finally {
+      setIsLoginLoading(false);
+    }
+  }
 
   // ── QR Scanned ──
   const handleQrScan = useCallback(
     (token: string) => {
+      if (!isLoggedIn) return;
+
       setQrToken(token);
       setPhase({
         idle: false,
@@ -88,27 +106,11 @@ export default function MahasiswaPage() {
         done: false,
       });
       addLog(`QR scanned: ${token.substring(0, 20)}...`);
-
-      const uid = getUserId();
-      if (!uid) {
-        pendingTokenRef.current = token;
-        setShowUserIdModal(true);
-      } else {
-        runCheckinFlow(token, uid);
-      }
+      runCheckinFlow(token, currentNim);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [isLoggedIn, currentNim],
   );
-
-  function handleUserIdSubmit() {
-    if (!userIdInput.trim()) return;
-    if (typeof window !== "undefined") {
-      localStorage.setItem("user_id", userIdInput.trim());
-    }
-    setShowUserIdModal(false);
-    runCheckinFlow(pendingTokenRef.current, userIdInput.trim());
-  }
 
   // ── Full Check-in Flow (Steps 1-15) ──
   async function runCheckinFlow(token: string, userId: string) {
@@ -120,21 +122,47 @@ export default function MahasiswaPage() {
     // Attempt to parse course_id & session_id from token
     let courseId = "";
     let sessionId = "";
+
+    addLog(`Parsing token: ${token.substring(0, 40)}...`);
+
     try {
-      const parsed = JSON.parse(atob(token.split(".")[1] || ""));
-      courseId = parsed.course_id || "";
-      sessionId = parsed.session_id || "";
-    } catch {
-      // Token may not be JWT - try URL params or use raw
-      try {
-        const url = new URL(token);
-        courseId = url.searchParams.get("course_id") || "";
-        sessionId = url.searchParams.get("session_id") || "";
-      } catch {
-        // Treat whole token as qr_token, need course_id and session_id from somewhere
-        courseId = token.split("|")[0] || token;
-        sessionId = token.split("|")[1] || "default";
+      // Try JWT format (payload contains course_id and session_id)
+      const parts = token.split(".");
+      if (parts.length >= 2) {
+        const decoded = JSON.parse(atob(parts[1]));
+        courseId = decoded.course_id || "";
+        sessionId = decoded.session_id || "";
+        if (courseId && sessionId) {
+          addLog(
+            `Parsed from JWT: course_id=${courseId}, session_id=${sessionId}`,
+          );
+        }
       }
+    } catch (e) {
+      console.log("[v0] JWT parse failed, trying other formats");
+    }
+
+    if (!courseId || !sessionId) {
+      try {
+        // Try URL format
+        const url = new URL(token);
+        courseId = url.searchParams.get("course_id") || courseId;
+        sessionId = url.searchParams.get("session_id") || sessionId;
+        if (courseId && sessionId) {
+          addLog(
+            `Parsed from URL: course_id=${courseId}, session_id=${sessionId}`,
+          );
+        }
+      } catch (e) {
+        console.log("[v0] URL parse failed");
+      }
+    }
+
+    if (!courseId || !sessionId) {
+      // Fallback: ask backend to parse it
+      courseId = courseId || "from-token";
+      sessionId = sessionId || "from-token";
+      addLog(`Using fallback: course_id=${courseId}, session_id=${sessionId}`);
     }
 
     try {
@@ -310,21 +338,93 @@ export default function MahasiswaPage() {
       </header>
 
       <div className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 py-6">
-        {/* Status Badge */}
-        {status && (
-          <div className="flex justify-center">
-            <StatusBadge status={status} />
-          </div>
+        {/* Login Form (Step 1) */}
+        {!isLoggedIn && (
+          <form onSubmit={handleLogin} className="flex flex-col gap-4">
+            <div className="text-center mb-4">
+              <h2 className="text-2xl font-bold text-foreground">
+                Login Mahasiswa
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Masukkan NIM Anda untuk memulai presensi
+              </p>
+            </div>
+
+            {loginError && (
+              <div className="rounded-xl bg-destructive/10 border border-destructive/30 p-3 text-sm font-medium text-destructive">
+                {loginError}
+              </div>
+            )}
+
+            <div className="flex flex-col gap-2">
+              <label
+                htmlFor="nim"
+                className="text-sm font-semibold text-foreground"
+              >
+                Nomor Induk Mahasiswa (NIM)
+              </label>
+              <input
+                id="nim"
+                type="text"
+                placeholder="Contoh: 081211833001"
+                value={currentNim}
+                onChange={(e) => setCurrentNim(e.target.value)}
+                disabled={isLoginLoading}
+                className="h-12 rounded-xl border border-input bg-card px-4 text-foreground placeholder:text-muted-foreground disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={isLoginLoading || !currentNim.trim()}
+              className="mt-2 h-12 w-full rounded-xl bg-primary text-base font-semibold text-primary-foreground shadow-md shadow-primary/20 transition-all active:scale-[0.98] hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {isLoginLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Memproses...
+                </>
+              ) : (
+                "Login"
+              )}
+            </button>
+          </form>
         )}
 
-        {/* QR Scanner */}
-        <div className="rounded-2xl bg-card p-5 shadow-sm">
-          <QrScanner
-            onScan={handleQrScan}
-            scanning={phase.scanning}
-            onToggle={toggleScanning}
-          />
-        </div>
+        {/* Scanner Section (Step 2) */}
+        {isLoggedIn && (
+          <>
+            {/* Status Badge */}
+            {status && (
+              <div className="flex justify-center">
+                <StatusBadge status={status} />
+              </div>
+            )}
+
+            {/* Logout Button */}
+            <button
+              onClick={() => {
+                setIsLoggedIn(false);
+                setCurrentNim("");
+                setStatus(null);
+                setQrToken("");
+                setLogMessages([]);
+              }}
+              className="text-sm text-primary hover:underline text-center"
+            >
+              Ganti Akun
+            </button>
+
+            {/* QR Scanner */}
+            <div className="rounded-2xl bg-card p-5 shadow-sm">
+              <QrScanner
+                onScan={handleQrScan}
+                scanning={phase.scanning}
+                onToggle={toggleScanning}
+              />
+            </div>
+          </>
+        )}
 
         {/* Processing indicator */}
         {phase.processing && (
@@ -343,16 +443,21 @@ export default function MahasiswaPage() {
           </p>
         )}
 
-        {/* GPS Card */}
-        <GpsCard data={gpsData} />
+        {/* Data Section (visible after login) */}
+        {isLoggedIn && (
+          <>
+            {/* GPS Card */}
+            <GpsCard data={gpsData} />
 
-        {/* Map */}
-        {(gpsData || gpsHistory.length > 0) && (
-          <LocationMap latest={gpsData} history={gpsHistory} />
+            {/* Map */}
+            {(gpsData || gpsHistory.length > 0) && (
+              <LocationMap latest={gpsData} history={gpsHistory} />
+            )}
+
+            {/* Accelerometer */}
+            <AccelerometerCard latest={accelLatest} samples={accelSamples} />
+          </>
         )}
-
-        {/* Accelerometer */}
-        <AccelerometerCard latest={accelLatest} samples={accelSamples} />
 
         {/* Log */}
         {logMessages.length > 0 && (
@@ -401,40 +506,20 @@ export default function MahasiswaPage() {
       {/* Success Popup */}
       {showSuccess && (
         <div className="fixed inset-0 flex items-center justify-center bg-black/40 z-50">
-          <div className="bg-white rounded-2xl shadow-xl p-6 text-center animate-scale">
-            <h2 className="text-xl font-semibold text-green-600">
-              ✅ Presensi Berhasil
-            </h2>
-            <p className="text-gray-600 mt-2">Kehadiran kamu sudah tercatat.</p>
-          </div>
-        </div>
-      )}
-
-      {/* User ID Modal */}
-      {showUserIdModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 px-4">
-          <div className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-xl">
-            <h2 className="pb-1 text-lg font-bold text-foreground">
-              Masukkan User ID
-            </h2>
-            <p className="pb-4 text-sm text-muted-foreground">
-              User ID diperlukan untuk presensi.
+          <div className="bg-card rounded-2xl shadow-xl p-6 text-center animate-scale border border-border">
+            <div className="flex justify-center mb-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-100">
+                <span className="text-2xl">✓</span>
+              </div>
+            </div>
+            <h2 className="text-xl font-bold text-foreground">Scan Berhasil</h2>
+            <p className="text-sm text-muted-foreground mt-2">
+              Presensi kamu sudah tercatat dengan baik. Data GPS dan
+              accelerometer telah dikirim ke server.
             </p>
-            <input
-              type="text"
-              placeholder="Contoh: mhs001"
-              value={userIdInput}
-              onChange={(e) => setUserIdInput(e.target.value)}
-              className="mb-4 h-12 w-full rounded-xl border border-input bg-background px-4 text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-              autoFocus
-            />
-            <button
-              onClick={handleUserIdSubmit}
-              disabled={!userIdInput.trim()}
-              className="flex h-12 w-full items-center justify-center rounded-2xl bg-primary text-sm font-semibold text-primary-foreground transition-all active:scale-[0.98] hover:opacity-90 disabled:opacity-60"
-            >
-              Simpan & Lanjutkan
-            </button>
+            <p className="text-xs text-muted-foreground mt-3 font-medium">
+              {qrToken && `Token: ${qrToken.substring(0, 30)}...`}
+            </p>
           </div>
         </div>
       )}

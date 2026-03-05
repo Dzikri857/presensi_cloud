@@ -49,7 +49,7 @@ export default function OnboardingPage() {
         {/* Action Buttons */}
         <div className="flex w-full flex-col items-center gap-3 pt-4">
           <button
-            onClick={() => router.push("/mahasiswa/login")}
+            onClick={() => router.push("/mahasiswa")}
             className="flex h-11 w-60 items-center justify-center gap-2 rounded-xl bg-blue-900 text-sm font-medium text-white shadow-md transition-all duration-200 hover:bg-blue-800 hover:shadow-lg active:scale-[0.98]"
           >
             <GraduationCap className="h-4 w-4" />

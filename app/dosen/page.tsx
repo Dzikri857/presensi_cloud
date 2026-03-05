@@ -24,11 +24,17 @@ export default function DosenPage() {
     setError("");
     setResult(null);
 
-    const res = await generateQr(courseId.trim(), sessionId.trim());
-    if (res.ok) {
-      setResult(res.data);
-    } else {
-      setError(res.error ?? "Gagal generate QR.");
+    try {
+      const res = await generateQr(courseId.trim(), sessionId.trim());
+      if (res.ok) {
+        console.log("[v0] QR Generated:", res.data);
+        setResult(res.data);
+      } else {
+        setError(res.error ?? "Gagal generate QR.");
+      }
+    } catch (err) {
+      console.error("[v0] Generate QR error:", err);
+      setError("Gagal generate QR. Periksa koneksi backend.");
     }
     setLoading(false);
   }
@@ -59,7 +65,9 @@ export default function DosenPage() {
           <ArrowLeft className="h-5 w-5" />
         </button>
         <div>
-          <h1 className="text-lg font-bold text-foreground">Generate QR Presensi</h1>
+          <h1 className="text-lg font-bold text-foreground">
+            Generate QR Presensi
+          </h1>
           <p className="text-xs text-muted-foreground">Panel Dosen</p>
         </div>
       </header>
@@ -69,7 +77,10 @@ export default function DosenPage() {
         <div className="rounded-2xl bg-card p-5 shadow-sm">
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
-              <label htmlFor="course_id" className="text-sm font-medium text-foreground">
+              <label
+                htmlFor="course_id"
+                className="text-sm font-medium text-foreground"
+              >
                 Course ID
               </label>
               <input
@@ -82,7 +93,10 @@ export default function DosenPage() {
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <label htmlFor="session_id" className="text-sm font-medium text-foreground">
+              <label
+                htmlFor="session_id"
+                className="text-sm font-medium text-foreground"
+              >
                 Session ID
               </label>
               <input
@@ -119,7 +133,9 @@ export default function DosenPage() {
         {/* QR Result Card */}
         {result && (
           <div className="flex flex-col items-center gap-5 rounded-2xl bg-card p-6 shadow-sm">
-            <p className="text-sm font-medium text-muted-foreground">QR Code Presensi</p>
+            <p className="text-sm font-medium text-muted-foreground">
+              QR Code Presensi
+            </p>
 
             <div className="rounded-2xl border-2 border-dashed border-primary/30 p-4">
               <QRCodeSVG
@@ -141,7 +157,11 @@ export default function DosenPage() {
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-background"
                 aria-label="Copy token"
               >
-                {copied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
+                {copied ? (
+                  <Check className="h-4 w-4 text-success" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
               </button>
             </div>
 
