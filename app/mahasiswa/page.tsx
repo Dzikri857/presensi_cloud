@@ -16,6 +16,7 @@ import {
   getAccelLatest,
   getGpsLatest,
   getGpsHistory,
+  generateQr,
   type GpsLatest,
   type AccelLatest,
   type GpsHistoryPoint,
@@ -24,6 +25,15 @@ import {
 } from "@/lib/api";
 import { getDeviceId, setUserId } from "@/lib/device";
 import { loginMahasiswa } from "@/lib/api";
+
+// Session QR format from dosen
+interface SessionQR {
+  type: "session";
+  course_id: string;
+  session_id: string;
+  created_at: string;
+  expires_at: string;
+}
 
 interface CheckinState {
   idle: boolean;
@@ -42,7 +52,7 @@ export default function MahasiswaPage() {
   const router = useRouter();
 
   // State - New flow: Scan QR first, then input NIM
-  const [qrToken, setQrToken] = useState("");
+  const [sessionData, setSessionData] = useState<SessionQR | null>(null);
   const [qrScanned, setQrScanned] = useState(false);
   const [currentNim, setCurrentNim] = useState("");
   const [nimError, setNimError] = useState("");
@@ -71,29 +81,56 @@ export default function MahasiswaPage() {
     ]);
   }, []);
 
-  // ── QR Scanned - Now just stores the token, doesn't process yet ──
+  // ── QR Scanned - Parse session data from QR ──
   const handleQrScan = useCallback(
-    (token: string) => {
-      setQrToken(token);
-      setQrScanned(true);
-      setPhase({
-        idle: false,
-        scanning: false,
-        processing: false,
-        done: false,
-      });
-      addLog(`QR scanned: ${token.substring(0, 20)}...`);
+    (qrContent: string) => {
+      try {
+        // Try to parse as session QR (JSON format)
+        const parsed = JSON.parse(qrContent) as SessionQR;
+        
+        if (parsed.type === "session" && parsed.course_id && parsed.session_id) {
+          // Check if QR is expired
+          const expiresAt = new Date(parsed.expires_at);
+          if (expiresAt < new Date()) {
+            addLog("QR Code sudah expired!");
+            setError("QR Code sudah tidak berlaku. Minta dosen untuk generate ulang.");
+            return;
+          }
+          
+          setSessionData(parsed);
+          setQrScanned(true);
+          setPhase({
+            idle: false,
+            scanning: false,
+            processing: false,
+            done: false,
+          });
+          addLog(`Session QR scanned: ${parsed.course_id}/${parsed.session_id}`);
+        } else {
+          addLog("Format QR tidak valid");
+          setError("Format QR tidak valid. Pastikan menggunakan QR dari dosen.");
+        }
+      } catch {
+        addLog("Gagal parse QR - format tidak dikenal");
+        setError("Format QR tidak dikenal. Pastikan menggunakan QR dari dosen.");
+      }
     },
     [addLog],
   );
 
-  // ── Handle NIM Submit - Process check-in for this student ──
+  // ── Handle NIM Submit - Generate new token for this student and process check-in ──
   async function handleNimSubmit(e: React.FormEvent) {
     e.preventDefault();
     setNimError("");
+    setError("");
 
     if (!currentNim.trim()) {
       setNimError("NIM harus diisi");
+      return;
+    }
+
+    if (!sessionData) {
+      setNimError("Session data tidak valid. Silakan scan ulang QR.");
       return;
     }
 
@@ -117,8 +154,20 @@ export default function MahasiswaPage() {
       setUserId(loginRes.data.user_id);
       addLog(`Login berhasil: ${loginRes.data.user_id}`);
 
-      // Run check-in flow
-      await runCheckinFlow(qrToken, currentNim);
+      // Generate a NEW token for this specific student
+      addLog(`Generating token untuk ${currentNim}...`);
+      const qrRes = await generateQr(sessionData.course_id, sessionData.session_id);
+      
+      if (!qrRes.ok) {
+        setNimError(qrRes.error || "Gagal generate token");
+        setIsProcessing(false);
+        return;
+      }
+
+      addLog(`Token generated: ${qrRes.data.qr_token.substring(0, 30)}...`);
+
+      // Run check-in flow with the NEW token
+      await runCheckinFlow(qrRes.data.qr_token, currentNim, sessionData.course_id, sessionData.session_id);
     } catch (err) {
       setNimError("Terjadi kesalahan koneksi");
       console.error("Submit error:", err);
@@ -127,58 +176,15 @@ export default function MahasiswaPage() {
   }
 
   // ── Full Check-in Flow for a single student ──
-  async function runCheckinFlow(token: string, nim: string) {
+  async function runCheckinFlow(token: string, nim: string, courseId: string, sessionId: string) {
     setPhase({ idle: false, scanning: false, processing: true, done: false });
     setError("");
 
     const deviceId = getDeviceId();
     const userId = nim;
 
-    // Attempt to parse course_id & session_id from token
-    let courseId = "";
-    let sessionId = "";
-
-    addLog(`Parsing token: ${token.substring(0, 40)}...`);
-
-    try {
-      // Try JWT format (payload contains course_id and session_id)
-      const parts = token.split(".");
-      if (parts.length >= 2) {
-        const decoded = JSON.parse(atob(parts[1]));
-        courseId = decoded.course_id || "";
-        sessionId = decoded.session_id || "";
-        if (courseId && sessionId) {
-          addLog(
-            `Parsed from JWT: course_id=${courseId}, session_id=${sessionId}`,
-          );
-        }
-      }
-    } catch (e) {
-      console.log("JWT parse failed, trying other formats");
-    }
-
-    if (!courseId || !sessionId) {
-      try {
-        // Try URL format
-        const url = new URL(token);
-        courseId = url.searchParams.get("course_id") || courseId;
-        sessionId = url.searchParams.get("session_id") || sessionId;
-        if (courseId && sessionId) {
-          addLog(
-            `Parsed from URL: course_id=${courseId}, session_id=${sessionId}`,
-          );
-        }
-      } catch (e) {
-        console.log("URL parse failed");
-      }
-    }
-
-    if (!courseId || !sessionId) {
-      // Fallback: ask backend to parse it
-      courseId = courseId || "from-token";
-      sessionId = sessionId || "from-token";
-      addLog(`Using fallback: course_id=${courseId}, session_id=${sessionId}`);
-    }
+    addLog(`Processing check-in for ${nim}...`);
+    addLog(`Course: ${courseId}, Session: ${sessionId}`);
 
     try {
       // Step 5-6: Get GPS & POST
@@ -406,19 +412,20 @@ export default function MahasiswaPage() {
               </div>
               <div className="flex-1">
                 <p className="text-sm font-semibold text-green-800 dark:text-green-200">
-                  QR Code Aktif
+                  {sessionData?.course_id} / {sessionData?.session_id}
                 </p>
                 <p className="text-xs text-green-600 dark:text-green-400">
-                  Masukkan NIM untuk presensi
+                  QR aktif - Masukkan NIM untuk presensi
                 </p>
               </div>
               <button
                 onClick={() => {
                   setQrScanned(false);
-                  setQrToken("");
+                  setSessionData(null);
                   setAttendanceList([]);
                   setCurrentNim("");
                   setLogMessages([]);
+                  setError("");
                 }}
                 className="text-xs text-green-700 dark:text-green-300 hover:underline"
               >
@@ -574,15 +581,28 @@ export default function MahasiswaPage() {
           </div>
         )}
 
-        {/* QR Token display */}
-        {qrToken && (
+        {/* Session Info display */}
+        {sessionData && (
           <div className="rounded-2xl bg-card p-5 shadow-sm">
-            <h3 className="pb-2 text-sm font-semibold text-foreground">
-              QR Token
+            <h3 className="pb-3 text-sm font-semibold text-foreground">
+              Info Sesi Presensi
             </h3>
-            <code className="block break-all rounded-xl bg-secondary p-3 text-xs text-foreground">
-              {qrToken}
-            </code>
+            <div className="space-y-2">
+              <div className="flex justify-between rounded-xl bg-secondary px-4 py-2">
+                <span className="text-xs text-muted-foreground">Course</span>
+                <span className="text-xs font-medium text-foreground">{sessionData.course_id}</span>
+              </div>
+              <div className="flex justify-between rounded-xl bg-secondary px-4 py-2">
+                <span className="text-xs text-muted-foreground">Session</span>
+                <span className="text-xs font-medium text-foreground">{sessionData.session_id}</span>
+              </div>
+              <div className="flex justify-between rounded-xl bg-secondary px-4 py-2">
+                <span className="text-xs text-muted-foreground">Berlaku Sampai</span>
+                <span className="text-xs font-medium text-foreground">
+                  {new Date(sessionData.expires_at).toLocaleTimeString("id-ID")}
+                </span>
+              </div>
+            </div>
           </div>
         )}
       </div>

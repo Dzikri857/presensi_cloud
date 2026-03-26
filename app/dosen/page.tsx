@@ -2,52 +2,58 @@
 
 import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { generateQr, type QrGenerateResponse } from "@/lib/api";
-import { ArrowLeft, QrCode, Loader2, Clock, Copy, Check } from "lucide-react";
+import { ArrowLeft, QrCode, Copy, Check, Users, RefreshCw } from "lucide-react";
 import { useRouter } from "next/navigation";
+
+// QR now contains session info instead of a one-time token
+interface SessionQR {
+  type: "session";
+  course_id: string;
+  session_id: string;
+  created_at: string;
+  expires_at: string;
+}
 
 export default function DosenPage() {
   const router = useRouter();
   const [courseId, setCourseId] = useState("");
   const [sessionId, setSessionId] = useState("");
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [result, setResult] = useState<QrGenerateResponse | null>(null);
+  const [sessionQR, setSessionQR] = useState<SessionQR | null>(null);
   const [copied, setCopied] = useState(false);
 
-  async function handleGenerate() {
+  function handleGenerate() {
     if (!courseId.trim() || !sessionId.trim()) {
       setError("Course ID dan Session ID wajib diisi.");
       return;
     }
-    setLoading(true);
     setError("");
-    setResult(null);
 
-    try {
-      const res = await generateQr(courseId.trim(), sessionId.trim());
-      if (res.ok) {
-        console.log("[v0] QR Generated:", res.data);
-        setResult(res.data);
-      } else {
-        setError(res.error ?? "Gagal generate QR.");
-      }
-    } catch (err) {
-      console.error("[v0] Generate QR error:", err);
-      setError("Gagal generate QR. Periksa koneksi backend.");
-    }
-    setLoading(false);
+    // Create session QR data (valid for 2 hours)
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 2 * 60 * 60 * 1000); // 2 hours
+
+    const qrData: SessionQR = {
+      type: "session",
+      course_id: courseId.trim(),
+      session_id: sessionId.trim(),
+      created_at: now.toISOString(),
+      expires_at: expiresAt.toISOString(),
+    };
+
+    console.log("[v0] Session QR Generated:", qrData);
+    setSessionQR(qrData);
   }
 
-  function handleCopyToken() {
-    if (!result) return;
-    navigator.clipboard.writeText(result.qr_token);
+  function handleCopyData() {
+    if (!sessionQR) return;
+    navigator.clipboard.writeText(JSON.stringify(sessionQR));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
 
-  const expiresDate = result?.expires_at
-    ? new Date(result.expires_at).toLocaleString("id-ID", {
+  const expiresDate = sessionQR?.expires_at
+    ? new Date(sessionQR.expires_at).toLocaleString("id-ID", {
         dateStyle: "medium",
         timeStyle: "medium",
       })
@@ -117,29 +123,32 @@ export default function DosenPage() {
 
             <button
               onClick={handleGenerate}
-              disabled={loading}
               className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-primary text-base font-semibold text-primary-foreground shadow-md shadow-primary/20 transition-all active:scale-[0.98] hover:opacity-90 disabled:opacity-60"
             >
-              {loading ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                <QrCode className="h-5 w-5" />
-              )}
-              {loading ? "Generating..." : "Generate QR Code"}
+              <QrCode className="h-5 w-5" />
+              {sessionQR ? "Generate Ulang QR" : "Generate QR Code"}
             </button>
           </div>
         </div>
 
         {/* QR Result Card */}
-        {result && (
+        {sessionQR && (
           <div className="flex flex-col items-center gap-5 rounded-2xl bg-card p-6 shadow-sm">
+            {/* Multi-user indicator */}
+            <div className="flex items-center gap-2 rounded-xl bg-green-50 dark:bg-green-950/30 px-4 py-2 text-green-700 dark:text-green-300">
+              <Users className="h-4 w-4" />
+              <span className="text-sm font-medium">
+                QR ini bisa digunakan banyak mahasiswa
+              </span>
+            </div>
+
             <p className="text-sm font-medium text-muted-foreground">
-              QR Code Presensi
+              QR Code Presensi - {sessionQR.course_id} / {sessionQR.session_id}
             </p>
 
             <div className="rounded-2xl border-2 border-dashed border-primary/30 p-4">
               <QRCodeSVG
-                value={result.qr_token}
+                value={JSON.stringify(sessionQR)}
                 size={220}
                 level="H"
                 bgColor="transparent"
@@ -147,27 +156,39 @@ export default function DosenPage() {
               />
             </div>
 
-            {/* Token */}
-            <div className="flex w-full items-center gap-2 rounded-xl bg-secondary px-4 py-3">
-              <code className="flex-1 truncate text-xs text-foreground">
-                {result.qr_token}
-              </code>
-              <button
-                onClick={handleCopyToken}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-background"
-                aria-label="Copy token"
-              >
-                {copied ? (
-                  <Check className="h-4 w-4 text-success" />
-                ) : (
-                  <Copy className="h-4 w-4" />
-                )}
-              </button>
+            {/* Session Info */}
+            <div className="w-full space-y-2">
+              <div className="flex items-center justify-between rounded-xl bg-secondary px-4 py-3">
+                <span className="text-sm text-muted-foreground">Course ID</span>
+                <span className="text-sm font-medium text-foreground">{sessionQR.course_id}</span>
+              </div>
+              <div className="flex items-center justify-between rounded-xl bg-secondary px-4 py-3">
+                <span className="text-sm text-muted-foreground">Session ID</span>
+                <span className="text-sm font-medium text-foreground">{sessionQR.session_id}</span>
+              </div>
             </div>
+
+            {/* Copy Button */}
+            <button
+              onClick={handleCopyData}
+              className="flex items-center gap-2 rounded-xl bg-secondary px-4 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary/80"
+            >
+              {copied ? (
+                <>
+                  <Check className="h-4 w-4 text-green-600" />
+                  <span>Tersalin!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="h-4 w-4" />
+                  <span>Salin Data QR</span>
+                </>
+              )}
+            </button>
 
             {/* Expires */}
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Clock className="h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
               <span>Berlaku hingga: {expiresDate}</span>
             </div>
           </div>
