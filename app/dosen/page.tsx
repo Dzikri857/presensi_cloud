@@ -138,7 +138,7 @@ export default function DosenPage() {
             <div className="flex items-center gap-2 rounded-xl bg-green-50 dark:bg-green-950/30 px-4 py-2 text-green-700 dark:text-green-300">
               <Users className="h-4 w-4" />
               <span className="text-sm font-medium">
-                QR ini bisa digunakan banyak mahasiswa
+                QR untuk mahasiswa
               </span>
             </div>
 
